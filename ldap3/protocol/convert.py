@@ -56,7 +56,7 @@ def search_refs_to_list_fast(search_refs):
 
 
 def sasl_to_dict(sasl):
-    return {'mechanism': str(sasl['mechanism']), 'credentials': sasl['credentials'] if sasl['credentials'] is not None and sasl['credentials'].hasValue() else None}
+    return {'mechanism': str(sasl['mechanism']), 'credentials':  bytes(sasl['credentials']) if sasl['credentials'] is not None and sasl['credentials'].hasValue() else None}
 
 
 def authentication_choice_to_dict(authentication_choice):
@@ -161,7 +161,10 @@ def validate_attribute_value(schema, name, value, auto_encode, validator=None):
             elif validated is not True:  # a valid LDAP value equivalent to the actual value
                 value = validated
         # converts to utf-8 for well known Unicode LDAP syntaxes
-        if auto_encode and (schema.attribute_types[name].syntax in conf_utf8_syntaxes or name.lower() in conf_utf8_types):
+        if auto_encode and ((name in schema.attribute_types and
+                            schema.attribute_types[name].syntax
+                            in conf_utf8_syntaxes) or name.lower() in
+                            conf_utf8_types):
             value = to_unicode(value)  # tries to convert from local encoding to Unicode
     return to_raw(value)
 

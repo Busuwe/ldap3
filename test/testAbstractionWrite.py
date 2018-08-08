@@ -4,7 +4,7 @@
 #
 # Author: Giovanni Cannata
 #
-# Copyright 2014, 2015, 2016 Giovanni Cannata
+# Copyright 2014 - 2018 Giovanni Cannata
 #
 # This file is part of ldap3.
 #
@@ -177,3 +177,4 @@ class Test(unittest.TestCase):
         e.myname += 'xyz'
         w.commit()
         self.assertTrue('xyz' in e.myname)
+

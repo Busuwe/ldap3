@@ -5,7 +5,7 @@
 #
 # Author: Giovanni Cannata
 #
-# Copyright 2014, 2015, 2016, 2017 Giovanni Cannata
+# Copyright 2014 - 2018 Giovanni Cannata
 #
 # This file is part of ldap3.
 #
@@ -28,20 +28,21 @@ from datetime import datetime
 from os import linesep
 from time import sleep
 
-from ldap3.abstract import STATUS_PENDING_CHANGES
+from . import STATUS_VIRTUAL, STATUS_READ, STATUS_WRITABLE
 from .. import SUBTREE, LEVEL, DEREF_ALWAYS, DEREF_NEVER, BASE, SEQUENCE_TYPES, STRING_TYPES, get_config_parameter
+from ..abstract import STATUS_PENDING_CHANGES
 from .attribute import Attribute, OperationalAttribute, WritableAttribute
 from .attrDef import AttrDef
 from .objectDef import ObjectDef
 from .entry import Entry, WritableEntry
-from ..core.exceptions import LDAPCursorError
+from ..core.exceptions import LDAPCursorError, LDAPObjectDereferenceError
 from ..core.results import RESULT_SUCCESS
 from ..utils.ciDict import CaseInsensitiveWithAliasDict
 from ..utils.dn import safe_dn, safe_rdn
 from ..utils.conv import to_raw
 from ..utils.config import get_config_parameter
-from . import STATUS_VIRTUAL, STATUS_READ, STATUS_WRITABLE
 from ..utils.log import log, log_enabled, ERROR, BASIC, PROTOCOL, EXTENDED
+from ..protocol.oid import ATTRIBUTE_DIRECTORY_OPERATION, ATTRIBUTE_DISTRIBUTED_OPERATION, ATTRIBUTE_DSA_OPERATION, CLASS_AUXILIARY
 
 Operation = namedtuple('Operation', ('request', 'result', 'response'))
 
@@ -72,15 +73,15 @@ class Cursor(object):
     # attribute_class = Attribute, must be defined in subclasses
     # entry_initial_status = STATUS, must be defined in subclasses
 
-    def __init__(self, connection, object_def, get_operational_attributes=False, attributes=None, controls=None):
+    def __init__(self, connection, object_def, get_operational_attributes=False, attributes=None, controls=None, auxiliary_class=None):
         conf_attributes_excluded_from_object_def = [v.lower() for v in get_config_parameter('ATTRIBUTES_EXCLUDED_FROM_OBJECT_DEF')]
         self.connection = connection
-
+        self.get_operational_attributes = get_operational_attributes
         if connection._deferred_bind or connection._deferred_open:  # probably a lazy connection, tries to bind
             connection._fire_deferred()
 
-        if isinstance(object_def, STRING_TYPES):
-            object_def = ObjectDef(object_def, connection.server.schema)
+        if isinstance(object_def, (STRING_TYPES, SEQUENCE_TYPES)):
+            object_def = ObjectDef(object_def, connection.server.schema, auxiliary_class=auxiliary_class)
         self.definition = object_def
         if attributes:  # checks if requested attributes are defined in ObjectDef
             not_defined_attributes = []
@@ -98,7 +99,6 @@ class Cursor(object):
                 raise LDAPCursorError(error_message)
 
         self.attributes = set(attributes) if attributes else set([attr.name for attr in self.definition])
-        self.get_operational_attributes = get_operational_attributes
         self.controls = controls
         self.execution_time = None
         self.entries = []
@@ -109,23 +109,28 @@ class Cursor(object):
     def __repr__(self):
         r = 'CURSOR : ' + self.__class__.__name__ + linesep
         r += 'CONN   : ' + str(self.connection) + linesep
-        r += 'DEFS   : ' + repr(self.definition._object_class) + ' ['
-        for attr_def in sorted(self.definition):
-            r += (attr_def.key if attr_def.key == attr_def.name else (attr_def.key + ' <' + attr_def.name + '>')) + ', '
-        if r[-2] == ',':
-            r = r[:-2]
-        r += ']' + linesep
-        r += 'ATTRS  : ' + repr(sorted(self.attributes)) + (' [OPERATIONAL]' if self.get_operational_attributes else '') + linesep
+        r += 'DEFS   : ' + ', '.join(self.definition._object_class)
+        if self.definition._auxiliary_class:
+            r += ' [AUX: ' + ', '.join(self.definition._auxiliary_class) + ']'
+        r += linesep
+        # for attr_def in sorted(self.definition):
+        #     r += (attr_def.key if attr_def.key == attr_def.name else (attr_def.key + ' <' + attr_def.name + '>')) + ', '
+        # if r[-2] == ',':
+        #     r = r[:-2]
+        # r += ']' + linesep
+        if hasattr(self, 'attributes'):
+            r += 'ATTRS  : ' + repr(sorted(self.attributes)) + (' [OPERATIONAL]' if self.get_operational_attributes else '') + linesep
         if isinstance(self, Reader):
-            r += 'BASE   : ' + repr(self.base) + (' [SUB]' if self.sub_tree else ' [LEVEL]') + linesep
-            if self._query:
+            if hasattr(self, 'base'):
+                r += 'BASE   : ' + repr(self.base) + (' [SUB]' if self.sub_tree else ' [LEVEL]') + linesep
+            if hasattr(self, '_query') and self._query:
                 r += 'QUERY  : ' + repr(self._query) + ('' if '(' in self._query else (' [AND]' if self.components_in_and else ' [OR]')) + linesep
-            if self.validated_query:
+            if hasattr(self, 'validated_query') and self.validated_query:
                 r += 'PARSED : ' + repr(self.validated_query) + ('' if '(' in self._query else (' [AND]' if self.components_in_and else ' [OR]')) + linesep
-            if self.query_filter:
+            if hasattr(self, 'query_filter') and self.query_filter:
                 r += 'FILTER : ' + repr(self.query_filter) + linesep
 
-        if self.execution_time:
+        if hasattr(self, 'execution_time') and self.execution_time:
             r += 'ENTRIES: ' + str(len(self.entries))
             r += ' [executed at: ' + str(self.execution_time.isoformat()) + ']' + linesep
 
@@ -216,7 +221,13 @@ class Cursor(object):
                         temp_reader = Reader(self.connection, attr_def.dereference_dn, base='', get_operational_attributes=self.get_operational_attributes, controls=self.controls)
                         temp_values = []
                         for element in attribute.values:
-                            temp_values.append(temp_reader.search_object(element))
+                            if entry.entry_dn != element:
+                                temp_values.append(temp_reader.search_object(element))
+                            else:
+                                error_message = 'object %s is referencing itself in the \'%s\' attribute' % (entry.entry_dn, attribute.definition.name)
+                                if log_enabled(ERROR):
+                                    log(ERROR, '%s for <%s>', error_message, self)
+                                raise LDAPObjectDereferenceError(error_message)
                         del temp_reader  # remove the temporary Reader
                         attribute.values = temp_values
                 attributes[attribute.key] = attribute
@@ -231,14 +242,21 @@ class Cursor(object):
 
         for attribute_name in response['attributes']:
             if attribute_name not in used_attribute_names:
-                if attribute_name not in attr_defs and attribute_name.lower() not in conf_attributes_excluded_from_object_def:
+                operational_attribute = False
+                # check if the type is an operational attribute
+                if attribute_name in self.schema.attribute_types:
+                    if self.schema.attribute_types[attribute_name].no_user_modification or self.schema.attribute_types[attribute_name].usage in [ATTRIBUTE_DIRECTORY_OPERATION, ATTRIBUTE_DISTRIBUTED_OPERATION, ATTRIBUTE_DSA_OPERATION]:
+                        operational_attribute = True
+                else:
+                    operational_attribute = True
+                if not operational_attribute and attribute_name not in attr_defs and attribute_name.lower() not in conf_attributes_excluded_from_object_def:
                     error_message = 'attribute \'%s\' not in object class \'%s\' for entry %s' % (attribute_name, ', '.join(entry.entry_definition._object_class), entry.entry_dn)
                     if log_enabled(ERROR):
                         log(ERROR, '%s for <%s>', error_message, self)
                     raise LDAPCursorError(error_message)
                 attribute = OperationalAttribute(AttrDef(conf_operational_attribute_prefix + attribute_name), entry, self)
                 attribute.raw_values = response['raw_attributes'][attribute_name]
-                attribute.values = response['attributes'][attribute_name]
+                attribute.values = response['attributes'][attribute_name] if isinstance(response['attributes'][attribute_name], SEQUENCE_TYPES) else [response['attributes'][attribute_name]]
                 if (conf_operational_attribute_prefix + attribute_name) not in attributes:
                     attributes[conf_operational_attribute_prefix + attribute_name] = attribute
 
@@ -323,7 +341,7 @@ class Cursor(object):
                                             search_filter=self.query_filter,
                                             search_scope=query_scope,
                                             dereference_aliases=self.dereference_aliases,
-                                            attributes=attributes if attributes else self.attributes,
+                                            attributes=attributes if attributes else list(self.attributes),
                                             get_operational_attributes=self.get_operational_attributes,
                                             controls=self.controls)
             if not self.connection.strategy.sync:
@@ -343,7 +361,12 @@ class Cursor(object):
             entry = self._create_entry(r)
             if entry is not None:
                 self.entries.append(entry)
-
+                if 'objectClass' in entry:
+                    for object_class in entry.objectClass:
+                        if self.schema.object_classes[object_class].kind == CLASS_AUXILIARY and object_class not in self.definition._auxiliary_class:
+                            # add auxiliary class to object definition
+                            self.definition._auxiliary_class.append(object_class)
+                            self.definition._populate_attr_defs(object_class)
         self.execution_time = datetime.now()
 
         if old_query_filter:  # requesting a single object so an always-valid filter is set
@@ -370,7 +393,8 @@ class Cursor(object):
 
     @property
     def failed(self):
-        return any([error.result['result'] != RESULT_SUCCESS for error in self._operation_history])
+        if hasattr(self, '_operation_history'):
+            return any([error.result['result'] != RESULT_SUCCESS for error in self._operation_history])
 
 
 class Reader(Cursor):
@@ -398,8 +422,8 @@ class Reader(Cursor):
     attribute_class = Attribute  # attributes are read_only
     entry_initial_status = STATUS_READ
 
-    def __init__(self, connection, object_def, base, query='', components_in_and=True, sub_tree=True, get_operational_attributes=False, attributes=None, controls=None):
-        Cursor.__init__(self, connection, object_def, get_operational_attributes, attributes, controls)
+    def __init__(self, connection, object_def, base, query='', components_in_and=True, sub_tree=True, get_operational_attributes=False, attributes=None, controls=None, auxiliary_class=None):
+        Cursor.__init__(self, connection, object_def, get_operational_attributes, attributes, controls, auxiliary_class)
         self._components_in_and = components_in_and
         self.sub_tree = sub_tree
         self._query = query
@@ -575,10 +599,10 @@ class Reader(Cursor):
             else:
                 self.query_filter += ')'
 
-            if not self.definition._object_class and attr_counter == 1:  # remove unneeded starting filter
+            if not self.definition._object_class and attr_counter == 1:  # removes unneeded starting filter
                 self.query_filter = self.query_filter[2: -1]
 
-            if self.query_filter == '(|)' or self.query_filter == '(&)':  # remove empty filter
+            if self.query_filter == '(|)' or self.query_filter == '(&)':  # removes empty filter
                 self.query_filter = ''
         else:  # no query, remove unneeded leading (&
             self.query_filter = self.query_filter[2:]
@@ -642,6 +666,10 @@ class Reader(Cursor):
 
         return self.entries
 
+    def _entries_generator(self, responses):
+        for response in responses:
+            yield self._create_entry(response)
+
     def search_paged(self, paged_size, paged_criticality=True, generator=True, attributes=None):
         """Perform a paged search, can be called as an Iterator
 
@@ -668,17 +696,20 @@ class Reader(Cursor):
         self._create_query_filter()
         self.entries = []
         self.execution_time = datetime.now()
-        return self.connection.extend.standard.paged_search(search_base=self.base,
-                                                                     search_filter=self.query_filter,
-                                                                     search_scope=SUBTREE if self.sub_tree else LEVEL,
-                                                                     dereference_aliases=self.dereference_aliases,
-                                                                     attributes=attributes if attributes else self.attributes,
-                                                                     get_operational_attributes=self.get_operational_attributes,
-                                                                     controls=self.controls,
-                                                                     paged_size=paged_size,
-                                                                     paged_criticality=paged_criticality,
-                                                                     generator=generator)
-            # yield self._create_entry(response)
+        response = self.connection.extend.standard.paged_search(search_base=self.base,
+                                                                search_filter=self.query_filter,
+                                                                search_scope=SUBTREE if self.sub_tree else LEVEL,
+                                                                dereference_aliases=self.dereference_aliases,
+                                                                attributes=attributes if attributes else self.attributes,
+                                                                get_operational_attributes=self.get_operational_attributes,
+                                                                controls=self.controls,
+                                                                paged_size=paged_size,
+                                                                paged_criticality=paged_criticality,
+                                                                generator=generator)
+        if generator:
+            return self._entries_generator(response)
+        else:
+            return list(self._entries_generator(response))
 
 
 class Writer(Cursor):
@@ -733,8 +764,8 @@ class Writer(Cursor):
             log(BASIC, 'instantiated Writer Cursor <%r> from response', writer)
         return writer
 
-    def __init__(self, connection, object_def, get_operational_attributes=False, attributes=None, controls=None):
-        Cursor.__init__(self, connection, object_def, get_operational_attributes, attributes, controls)
+    def __init__(self, connection, object_def, get_operational_attributes=False, attributes=None, controls=None, auxiliary_class=None):
+        Cursor.__init__(self, connection, object_def, get_operational_attributes, attributes, controls, auxiliary_class)
         self.dereference_aliases = DEREF_NEVER
 
         if log_enabled(BASIC):
@@ -864,7 +895,7 @@ class Writer(Cursor):
             for attr in entry._state.attributes:  # returns the attribute key
                 entry.__dict__[attr] = entry._state.attributes[attr]
 
-            for attr in entry.entry_attributes:  # if any attribute of the class was deleted make it virtual
+            for attr in entry.entry_attributes:  # if any attribute of the class was deleted makes it virtual
                 if attr not in entry._state.attributes and attr in entry.entry_definition._attributes:
                     entry._state.attributes[attr] = WritableAttribute(entry.entry_definition[attr], entry, self)
                     entry.__dict__[attr] = entry._state.attributes[attr]

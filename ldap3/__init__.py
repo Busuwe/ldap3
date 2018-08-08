@@ -5,7 +5,7 @@
 #
 # Author: Giovanni Cannata
 #
-# Copyright 2013, 2014, 2015, 2016, 2017 Giovanni Giovanni Cannata
+# Copyright 2013 - 2018 Giovanni Cannata
 #
 # This file is part of ldap3.
 #
@@ -37,6 +37,7 @@ DIGEST_MD5 = 'DIGEST-MD5'
 KERBEROS = GSSAPI = 'GSSAPI'
 PLAIN = 'PLAIN'
 
+AUTO_BIND_DEFAULT = 'DEFAULT'  # binds connection whens using "with" context manager
 AUTO_BIND_NONE = 'NONE'  # same as False
 AUTO_BIND_NO_TLS = 'NO_TLS'  # same as True
 AUTO_BIND_TLS_BEFORE_BIND = 'TLS_BEFORE_BIND'
@@ -110,7 +111,12 @@ HASHED_SALTED_SHA384 = 'SALTED_SHA384'
 HASHED_SALTED_SHA512 = 'SALTED_SHA512'
 HASHED_SALTED_MD5 = 'SALTED_MD5'
 
-NUMERIC_TYPES = (int, float)
+if str is not bytes:  # Python 3
+    NUMERIC_TYPES = (int, float)
+    INTEGER_TYPES = (int, )
+else:
+    NUMERIC_TYPES = (int, long, float)
+    INTEGER_TYPES = (int, long)
 
 # types for string and sequence
 if str is not bytes:  # Python 3

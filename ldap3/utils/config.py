@@ -5,7 +5,7 @@
 #
 # Author: Giovanni Cannata
 #
-# Copyright 2013, 2014, 2015, 2016, 2017 Giovanni Cannata
+# Copyright 2013 - 2018 Giovanni Cannata
 #
 # This file is part of ldap3.
 #
@@ -88,6 +88,7 @@ _REUSABLE_THREADED_LIFETIME = 3600  # 1 hour
 _DEFAULT_THREADED_POOL_NAME = 'REUSABLE_DEFAULT_POOL'
 _ADDRESS_INFO_REFRESH_TIME = 300  # seconds to wait before refreshing address info from dns
 _ADDITIONAL_SERVER_ENCODINGS = ['latin-1', 'koi8-r']  # some broken LDAP implementation may have different encoding than those expected by RFCs
+_ADDITIONAL_CLIENT_ENCODINGS = ['utf-8']
 _IGNORE_MALFORMED_SCHEMA = False  # some flaky LDAP servers returns malformed schema. If True no expection is raised and schema is thrown away
 _DEFAULT_SERVER_ENCODING = 'utf-8'  # should always be utf-8
 
@@ -97,6 +98,34 @@ elif getdefaultencoding():
     _DEFAULT_CLIENT_ENCODING = getdefaultencoding()
 else:
     _DEFAULT_CLIENT_ENCODING = 'utf-8'
+
+PARAMETERS = ['CASE_INSENSITIVE_ATTRIBUTE_NAMES',
+              'CASE_INSENSITIVE_SCHEMA_NAMES',
+              'ABSTRACTION_OPERATIONAL_ATTRIBUTE_PREFIX',
+              'POOLING_LOOP_TIMEOUT',
+              'RESPONSE_SLEEPTIME',
+              'RESPONSE_WAITING_TIMEOUT',
+              'SOCKET_SIZE',
+              'CHECK_AVAILABILITY_TIMEOUT',
+              'RESTARTABLE_SLEEPTIME',
+              'RESTARTABLE_TRIES',
+              'REUSABLE_THREADED_POOL_SIZE',
+              'REUSABLE_THREADED_LIFETIME',
+              'DEFAULT_THREADED_POOL_NAME',
+              'ADDRESS_INFO_REFRESH_TIME',
+              'RESET_AVAILABILITY_TIMEOUT',
+              'DEFAULT_CLIENT_ENCODING',
+              'DEFAULT_SERVER_ENCODING',
+              'CLASSES_EXCLUDED_FROM_CHECK',
+              'ATTRIBUTES_EXCLUDED_FROM_CHECK',
+              'UTF8_ENCODED_SYNTAXES',
+              'UTF8_ENCODED_TYPES',
+              'ADDITIONAL_SERVER_ENCODINGS',
+              'ADDITIONAL_CLIENT_ENCODINGS',
+              'IGNORE_MALFORMED_SCHEMA',
+              'ATTRIBUTES_EXCLUDED_FROM_OBJECT_DEF',
+              'IGNORED_MANDATORY_ATTRIBUTES_IN_OBJECT_DEF'
+              ]
 
 
 def get_config_parameter(parameter):
@@ -130,7 +159,7 @@ def get_config_parameter(parameter):
         return _ADDRESS_INFO_REFRESH_TIME
     elif parameter == 'RESET_AVAILABILITY_TIMEOUT':  # Integer
         return _RESET_AVAILABILITY_TIMEOUT
-    elif parameter in ['DEFAULT_CLIENT_ENCODING', 'DEFAULT_ENCODING']:  # String
+    elif parameter in ['DEFAULT_CLIENT_ENCODING', 'DEFAULT_ENCODING']:  # String - DEFAULT_ENCODING for backward compatibility
         return _DEFAULT_CLIENT_ENCODING
     elif parameter == 'DEFAULT_SERVER_ENCODING':  # String
         return _DEFAULT_SERVER_ENCODING
@@ -154,11 +183,16 @@ def get_config_parameter(parameter):
             return _UTF8_ENCODED_TYPES
         else:
             return [_UTF8_ENCODED_TYPES]
-    elif parameter in ['ADDITIONAL_SERVER_ENCODINGS', 'ADDITIONAL_ENCODINGS']:  # Sequence
+    elif parameter in ['ADDITIONAL_SERVER_ENCODINGS', 'ADDITIONAL_ENCODINGS']:  # Sequence - ADDITIONAL_ENCODINGS for backward compatibility
         if isinstance(_ADDITIONAL_SERVER_ENCODINGS, SEQUENCE_TYPES):
             return _ADDITIONAL_SERVER_ENCODINGS
         else:
             return [_ADDITIONAL_SERVER_ENCODINGS]
+    elif parameter in ['ADDITIONAL_CLIENT_ENCODINGS']:  # Sequence
+        if isinstance(_ADDITIONAL_CLIENT_ENCODINGS, SEQUENCE_TYPES):
+            return _ADDITIONAL_CLIENT_ENCODINGS
+        else:
+            return [_ADDITIONAL_CLIENT_ENCODINGS]
     elif parameter == 'IGNORE_MALFORMED_SCHEMA':  # Boolean
         return _IGNORE_MALFORMED_SCHEMA
     elif parameter == 'ATTRIBUTES_EXCLUDED_FROM_OBJECT_DEF':  # Sequence
@@ -242,6 +276,9 @@ def set_config_parameter(parameter, value):
     elif parameter in ['ADDITIONAL_SERVER_ENCODINGS', 'ADDITIONAL_ENCODINGS']:
         global _ADDITIONAL_SERVER_ENCODINGS
         _ADDITIONAL_SERVER_ENCODINGS = value if isinstance(value, SEQUENCE_TYPES) else [value]
+    elif parameter in ['ADDITIONAL_CLIENT_ENCODINGS']:
+        global _ADDITIONAL_CLIENT_ENCODINGS
+        _ADDITIONAL_CLIENT_ENCODINGS = value if isinstance(value, SEQUENCE_TYPES) else [value]
     elif parameter == 'IGNORE_MALFORMED_SCHEMA':
         global _IGNORE_MALFORMED_SCHEMA
         _IGNORE_MALFORMED_SCHEMA = value

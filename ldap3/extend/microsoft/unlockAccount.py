@@ -5,7 +5,7 @@
 #
 # Author: Giovanni Cannata
 #
-# Copyright 2015, 2016, 2017 Giovanni Cannata
+# Copyright 2015 - 2018 Giovanni Cannata
 #
 # This file is part of ldap3.
 #
@@ -34,7 +34,7 @@ def ad_unlock_account(connection, user_dn, controls=None):
     if connection.check_names:
         user_dn = safe_dn(user_dn)
     result = connection.modify(user_dn,
-                               {'lockoutTime': [(MODIFY_REPLACE, [0])]},
+                               {'lockoutTime': [(MODIFY_REPLACE, ['0'])]},
                                controls)
 
     if not connection.strategy.sync:

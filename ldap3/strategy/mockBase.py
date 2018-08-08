@@ -5,7 +5,7 @@
 #
 # Author: Giovanni Cannata
 #
-# Copyright 2016, 2017 Giovanni Cannata
+# Copyright 2016 - 2018 Giovanni Cannata
 #
 # This file is part of ldap3.
 #
@@ -53,7 +53,8 @@ from ..protocol.sasl.sasl import validate_simple_password
 from ..protocol.formatters.standard import find_attribute_validator, format_attribute_values
 from ..protocol.rfc2696 import paged_search_control
 from ..utils.log import log, log_enabled, ERROR, BASIC
-from ..utils.asn1 import encoder
+from ..utils.asn1 import encode
+from ..utils.conv import ldap_escape_to_bytes
 from ..strategy.base import BaseStrategy  # needed for decode_control() method
 from ..protocol.rfc4511 import LDAPMessage, ProtocolOp, MessageID
 from ..protocol.convert import build_controls_list
@@ -161,14 +162,13 @@ class MockBaseStrategy(object):
 
     def __init__(self):
         if not hasattr(self.connection.server, 'dit'):  # create entries dict if not already present
-            self.connection.server.dit_lock = Lock()
             self.connection.server.dit = CaseInsensitiveDict()
         self.entries = self.connection.server.dit  # for simpler reference
         self.no_real_dsa = True
         self.bound = None
         self.custom_validators = None
         self.operational_attributes = ['entryDN']
-        self.add_entry('cn=schema', [])  # add default entry for schema
+        self.add_entry('cn=schema', [], validate=False)  # add default entry for schema
         self._paged_sets = []  # list of paged search in progress
         if log_enabled(BASIC):
             log(BASIC, 'instantiated <%s>: <%s>', self.__class__.__name__, self)
@@ -185,32 +185,39 @@ class MockBaseStrategy(object):
         if self.connection.usage:
             self.connection._usage.closed_sockets += 1
 
-    def _prepare_value(self, attribute_type, value):
+    def _prepare_value(self, attribute_type, value, validate=True):
         """
         Prepare a value for being stored in the mock DIT
         :param value: object to store
         :return: raw value to store in the DIT
         """
-        validator = find_attribute_validator(self.connection.server.schema, attribute_type, self.custom_validators)
-        validated = validator(value)
-        if validated is False:
-            raise LDAPInvalidValueError('value \'%s\' non valid for attribute \'%s\'' % (value, attribute_type))
-        elif validated is not True:  # a valid LDAP value equivalent to the actual value
-            value = validated
+        if validate:  # if loading from json dump do not validate values:
+            validator = find_attribute_validator(self.connection.server.schema, attribute_type, self.custom_validators)
+            validated = validator(value)
+            if validated is False:
+                raise LDAPInvalidValueError('value non valid for attribute \'%s\'' % attribute_type)
+            elif validated is not True:  # a valid LDAP value equivalent to the actual value
+                value = validated
         raw_value = to_raw(value)
         if not isinstance(raw_value, bytes):
-            raise LDAPInvalidValueError('added values must be bytes if no offline schema is provided in Mock strategies')
+            raise LDAPInvalidValueError('The value "%s" of type %s for "%s" must be bytes or an offline schema needs to be provided when Mock strategy is used.' % (
+                value,
+                type(value),
+                attribute_type,
+            ))
         return raw_value
 
     def _update_attribute(self, dn, attribute_type, value):
         pass
 
-    def add_entry(self, dn, attributes):
+    def add_entry(self, dn, attributes, validate=True):
         with self.connection.server.dit_lock:
             escaped_dn = safe_dn(dn)
             if escaped_dn not in self.connection.server.dit:
                 new_entry = CaseInsensitiveDict()
                 for attribute in attributes:
+                    if attribute in self.operational_attributes:  # no restore of operational attributes, should be computed at runtime
+                        continue
                     if not isinstance(attributes[attribute], SEQUENCE_TYPES):  # entry attributes are always lists of bytes values
                         attributes[attribute] = [attributes[attribute]]
                     if self.connection.server.schema and self.connection.server.schema.attribute_types[attribute].single_value and len(attributes[attribute]) > 1:  # multiple values in single-valued attribute
@@ -232,7 +239,7 @@ class MockBaseStrategy(object):
                                 class_set.update(new_classes)
                             new_entry['objectClass'] = [to_raw(value) for value in class_set]
                     else:
-                        new_entry[attribute] = [self._prepare_value(attribute, value) for value in attributes[attribute]]
+                        new_entry[attribute] = [self._prepare_value(attribute, value, validate) for value in attributes[attribute]]
                 for rdn in safe_rdn(escaped_dn, decompose=True):  # adds rdns to entry attributes
                     if rdn[0] not in new_entry:  # if rdn attribute is missing adds attribute and its value
                         new_entry[rdn[0]] = [to_raw(rdn[1])]
@@ -274,7 +281,7 @@ class MockBaseStrategy(object):
                 if log_enabled(ERROR):
                     log(ERROR, '<%s> for <%s>', self.connection.last_error, self.connection)
                 raise LDAPDefinitionError(self.connection.last_error)
-            self.add_entry(entry['dn'], entry['raw'])
+            self.add_entry(entry['dn'], entry['raw'], validate=False)
         target.close()
 
     def mock_bind(self, request_message, controls):
@@ -649,18 +656,18 @@ class MockBaseStrategy(object):
             attributes.remove('+')
         attributes = [attr.lower() for attr in request['attributes']]
 
-        filter_root = parse_filter(request['filter'], self.connection.server.schema, auto_escape=True, auto_encode=False)
+        filter_root = parse_filter(request['filter'], self.connection.server.schema, auto_escape=True, auto_encode=False, validator=self.connection.server.custom_validator, check_names=self.connection.check_names)
         candidates = []
         if scope == 0:  # base object
             if base in self.connection.server.dit or base.lower() == 'cn=schema':
                 candidates.append(base)
         elif scope == 1:  # single level
             for entry in self.connection.server.dit:
-                if entry.endswith(base) and ',' not in entry[:-len(base) - 1]:  # only leafs without commas in the remaining dn
+                if entry.lower().endswith(base.lower()) and ',' not in entry[:-len(base) - 1]:  # only leafs without commas in the remaining dn
                     candidates.append(entry)
         elif scope == 2:  # whole subtree
             for entry in self.connection.server.dit:
-                if entry.endswith(base):
+                if entry.lower().endswith(base.lower()):
                     candidates.append(entry)
 
         if not candidates:  # incorrect base
@@ -668,17 +675,21 @@ class MockBaseStrategy(object):
             message = 'incorrect base object'
         else:
             matched = self.evaluate_filter_node(filter_root, candidates)
-            for match in matched:
-                responses.append({
-                    'object': match,
-                    'attributes': [{'type': attribute,
-                                    'vals': [] if request['typesOnly'] else self.connection.server.dit[match][attribute]}
-                                   for attribute in self.connection.server.dit[match]
-                                   if attribute.lower() in attributes or ALL_ATTRIBUTES in attributes]
-                })
+            if self.connection.raise_exceptions and 0 < request['sizeLimit'] < len(matched):
+                result_code = 4
+                message = 'size limit exceeded'
+            else:
+                for match in matched:
+                    responses.append({
+                        'object': match,
+                        'attributes': [{'type': attribute,
+                                        'vals': [] if request['typesOnly'] else self.connection.server.dit[match][attribute]}
+                                       for attribute in self.connection.server.dit[match]
+                                       if attribute.lower() in attributes or ALL_ATTRIBUTES in attributes]
+                    })
 
-            result_code = 0
-            message = ''
+                result_code = 0
+                message = ''
 
         result = {'resultCode': result_code,
                   'matchedDN': '',
@@ -714,12 +725,12 @@ class MockBaseStrategy(object):
                         result_code = 0
                         message = ''
                         response_name = '2.16.840.1.113719.1.27.100.32'  # getBindDNResponse [NOVELL]
-                        response_value = encoder.encode(OctetString(self.bound))
+                        response_value = OctetString(self.bound)
                     elif extension[0] == '1.3.6.1.4.1.4203.1.11.3':  # WhoAmI [RFC4532]
                         result_code = 0
                         message = ''
                         response_name = '1.3.6.1.4.1.4203.1.11.3'  # WhoAmI [RFC4532]
-                        response_value = encoder.encode(OctetString(self.bound))
+                        response_value = OctetString(self.bound)
                     break
 
         return {'resultCode': result_code,
@@ -744,15 +755,13 @@ class MockBaseStrategy(object):
         if node.tag == ROOT:
             return node.elements[0].matched
         elif node.tag == AND:
-            for element in node.elements:
-                if not node.matched:
-                    node.matched.update(element.matched)
-                else:
-                    node.matched.intersection_update(element.matched)
-                if not node.unmatched:
-                    node.unmatched.update(element.unmatched)
-                else:
-                    node.unmatched.intersection_update(element.unmatched)
+            first_element = node.elements[0]
+            node.matched.update(first_element.matched)
+            node.unmatched.update(first_element.unmatched)
+
+            for element in node.elements[1:]:
+                node.matched.intersection_update(element.matched)
+                node.unmatched.intersection_update(element.unmatched)
         elif node.tag == OR:
             for element in node.elements:
                 node.matched.update(element.matched)
@@ -819,7 +828,7 @@ class MockBaseStrategy(object):
             if 'final' in node.assertion and node.assertion['final'] is not None:
                 substring_filter += '.*' + re.escape(to_unicode(node.assertion['final'], SERVER_ENCODING))
 
-            if substring_filter and not node.assertion['any'] and not node.assertion['final']:  # only initial, adds .*
+            if substring_filter and not node.assertion.get('any', None) and not node.assertion.get('final', None):  # only initial, adds .*
                 substring_filter += '.*'
 
             regex_filter = re.compile(substring_filter, flags=re.UNICODE | re.IGNORECASE)  # unicode AND ignorecase
@@ -839,46 +848,33 @@ class MockBaseStrategy(object):
                 # if attr_name in self.connection.server.dit[candidate] and attr_value in self.connection.server.dit[candidate][attr_name]:
                 if attr_name in self.connection.server.dit[candidate] and self.equal(candidate, attr_name, attr_value):
                     node.matched.add(candidate)
-                # elif attr_name in self.connection.server.dit[candidate]:  # tries to apply formatters
-                #     formatted_values = format_attribute_values(self.connection.server.schema, attr_name, self.connection.server.dit[candidate][attr_name], None)
-                #     if not isinstance(formatted_values, SEQUENCE_TYPES):
-                #         formatted_values = [formatted_values]
-                #     # if attr_value.decode(SERVER_ENCODING) in formatted_values:  # attributes values should be returned in utf-8
-                #     if self.equal(attr_name, attr_value.decode(SERVER_ENCODING), formatted_values):  # attributes values should be returned in utf-8
-                #         node.matched.add(candidate)
-                #     else:
-                #         node.unmatched.add(candidate)
                 else:
                     node.unmatched.add(candidate)
 
-    def equal(self, dn, attribute, value):
+    def equal(self, dn, attribute_type, value_to_check):
         # value is the value to match
-        attribute_values = self.connection.server.dit[dn][attribute]
+        attribute_values = self.connection.server.dit[dn][attribute_type]
         if not isinstance(attribute_values, SEQUENCE_TYPES):
             attribute_values = [attribute_values]
+        escaped_value_to_check = ldap_escape_to_bytes(value_to_check)
         for attribute_value in attribute_values:
-            if self._check_equality(value, attribute_value):
+            if self._check_equality(escaped_value_to_check, attribute_value):
                 return True
-
-        # if not found tries to apply formatters
-        formatted_values = format_attribute_values(self.connection.server.schema, attribute, attribute_values, None)
-        if not isinstance(formatted_values, SEQUENCE_TYPES):
-            formatted_values = [formatted_values]
-        for attribute_value in formatted_values:
-            if self._check_equality(value, attribute_value):
+            if self._check_equality(self._prepare_value(attribute_type, value_to_check), attribute_value):
                 return True
-
         return False
 
     @staticmethod
     def _check_equality(value1, value2):
+        if value1 == value2:  # exact matching
+            return True
         if str(value1).isdigit() and str(value2).isdigit():
             if int(value1) == int(value2):  # int comparison
                 return True
         try:
             if to_unicode(value1, SERVER_ENCODING).lower() == to_unicode(value2, SERVER_ENCODING).lower():  # case insensitive comparison
                 return True
-        except UnicodeDecodeError:
+        except UnicodeError:
             pass
 
         return False
@@ -895,7 +891,7 @@ class MockBaseStrategy(object):
                 if message_controls is not None:
                     ldap_message['controls'] = message_controls
                 asn1_request = BaseStrategy.decode_request(message_type, request, controls)
-                self.connection._usage.update_transmitted_message(asn1_request, len(encoder.encode(ldap_message)))
+                self.connection._usage.update_transmitted_message(asn1_request, len(encode(ldap_message)))
             return message_id, message_type, request, controls
         else:
             self.connection.last_error = 'unable to send message, connection is not open'

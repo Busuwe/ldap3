@@ -5,7 +5,7 @@
 #
 # Author: Giovanni Cannata
 #
-# Copyright 2014, 2015, 2016, 2017 Giovanni Cannata
+# Copyright 2014 - 2018 Giovanni Cannata
 #
 # This file is part of ldap3.
 #
@@ -67,7 +67,8 @@ class Server(object):
     """
 
     _message_counter = 0
-    _message_id_lock = Lock()
+    _message_id_lock = Lock()  # global lock for message_id shared by all Server objects
+
 
     def __init__(self,
                  host,
@@ -78,7 +79,8 @@ class Server(object):
                  tls=None,
                  formatter=None,
                  connect_timeout=None,
-                 mode=IP_V6_PREFERRED):
+                 mode=IP_V6_PREFERRED,
+                 validator=None):
 
         self.ipc = False
         url_given = False
@@ -192,8 +194,9 @@ class Server(object):
         self.get_info = get_info
         self._dsa_info = None
         self._schema_info = None
-        self.lock = Lock()
+        self.dit_lock = Lock()
         self.custom_formatter = formatter
+        self.custom_validator = validator
         self._address_info = []  # property self.address_info resolved at open time (or when check_availability is called)
         self._address_info_resolved_time = datetime(MINYEAR, 1, 1)  # smallest date ever
         self.current_address = None
@@ -209,7 +212,7 @@ class Server(object):
     def _is_ipv6(host):
         try:
             socket.inet_pton(socket.AF_INET6, host)
-        except (socket.error, AttributeError):
+        except (socket.error, AttributeError, ValueError):
             return False
         return True
 
@@ -301,9 +304,10 @@ class Server(object):
                 finally:
                     try:
                         temp_socket.shutdown(socket.SHUT_RDWR)
-                        temp_socket.close()
                     except socket.error:
                         available = False
+                    finally:
+                        temp_socket.close()
             except socket.gaierror:
                 available = False
 
@@ -359,10 +363,10 @@ class Server(object):
                                                    '+'],  # requests all remaining attributes (other),
                                        get_operational_attributes=True)
 
-            with self.lock:
+            with self.dit_lock:
                 if isinstance(result, bool):  # sync request
                     self._dsa_info = DsaInfo(connection.response[0]['attributes'], connection.response[0]['raw_attributes']) if result else self._dsa_info
-                elif result:  # async request, must check if attributes in response
+                elif result:  # asynchronous request, must check if attributes in response
                     results, _ = connection.get_response(result)
                     if len(results) == 1 and 'attributes' in results[0] and 'raw_attributes' in results[0]:
                         self._dsa_info = DsaInfo(results[0]['attributes'], results[0]['raw_attributes'])
@@ -388,11 +392,13 @@ class Server(object):
             result = connection.search(entry, '(objectClass=*)', BASE, attributes=['subschemaSubentry'], get_operational_attributes=True)
             if isinstance(result, bool):  # sync request
                 if result and 'subschemaSubentry' in connection.response[0]['raw_attributes']:
-                    schema_entry = connection.response[0]['raw_attributes']['subschemaSubentry'][0]
-            else:  # async request, must check if subschemaSubentry in attributes
+                    if len(connection.response[0]['raw_attributes']['subschemaSubentry']) > 0:
+                        schema_entry = connection.response[0]['raw_attributes']['subschemaSubentry'][0]
+            else:  # asynchronous request, must check if subschemaSubentry in attributes
                 results, _ = connection.get_response(result)
                 if len(results) == 1 and 'raw_attributes' in results[0] and 'subschemaSubentry' in results[0]['attributes']:
-                    schema_entry = results[0]['raw_attributes']['subschemaSubentry'][0]
+                    if len(results[0]['raw_attributes']['subschemaSubentry']) > 0:
+                        schema_entry = results[0]['raw_attributes']['subschemaSubentry'][0]
 
         if schema_entry and not connection.strategy.pooled:  # in pooled strategies get_schema_info is performed by the worker threads
             if isinstance(schema_entry, bytes) and str is not bytes:  # Python 3
@@ -413,12 +419,12 @@ class Server(object):
                                                    '*'],  # requests all remaining attributes (other)
                                        get_operational_attributes=True
                                        )
-            with self.lock:
+            with self.dit_lock:
                 self._schema_info = None
                 if result:
                     if isinstance(result, bool):  # sync request
                         self._schema_info = SchemaInfo(schema_entry, connection.response[0]['attributes'], connection.response[0]['raw_attributes']) if result else None
-                    else:  # async request, must check if attributes in response
+                    else:  # asynchronous request, must check if attributes in response
                         results, result = connection.get_response(result)
                         if len(results) == 1 and 'attributes' in results[0] and 'raw_attributes' in results[0]:
                             self._schema_info = SchemaInfo(schema_entry, results[0]['attributes'], results[0]['raw_attributes'])
@@ -480,7 +486,7 @@ class Server(object):
         return self._schema_info
 
     @staticmethod
-    def from_definition(host, dsa_info, dsa_schema, port=None, use_ssl=False, formatter=None):
+    def from_definition(host, dsa_info, dsa_schema, port=None, use_ssl=False, formatter=None, validator=None):
         """
         Define a dummy server with preloaded schema and info
         :param host: host name
@@ -492,9 +498,9 @@ class Server(object):
         :return: Server object
         """
         if isinstance(host, SEQUENCE_TYPES):
-            dummy = Server(host=host[0], port=port, use_ssl=use_ssl, formatter=formatter, get_info=ALL)  # for ServerPool object
+            dummy = Server(host=host[0], port=port, use_ssl=use_ssl, formatter=formatter, validator=validator, get_info=ALL)  # for ServerPool object
         else:
-            dummy = Server(host=host, port=port, use_ssl=use_ssl, formatter=formatter, get_info=ALL)
+            dummy = Server(host=host, port=port, use_ssl=use_ssl, formatter=formatter, validator=validator, get_info=ALL)
         if isinstance(dsa_info, DsaInfo):
             dummy._dsa_info = dsa_info
         elif isinstance(dsa_info, STRING_TYPES):

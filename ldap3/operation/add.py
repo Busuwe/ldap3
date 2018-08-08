@@ -5,7 +5,7 @@
 #
 # Author: Giovanni Cannata
 #
-# Copyright 2013, 2014, 2015, 2016, 2017 Giovanni Cannata
+# Copyright 2013 - 2018 Giovanni Cannata
 #
 # This file is part of ldap3.
 #
@@ -31,7 +31,9 @@ from ..protocol.convert import referrals_to_list, attributes_to_dict, validate_a
 def add_operation(dn,
                   attributes,
                   auto_encode,
-                  schema=None):
+                  schema=None,
+                  validator=None,
+                  check_names=False):
     # AddRequest ::= [APPLICATION 8] SEQUENCE {
     #     entry           LDAPDN,
     #     attributes      AttributeList }
@@ -44,9 +46,9 @@ def add_operation(dn,
         vals = Vals()  # changed from ValsAtLeast1() for allowing empty member value in groups
         if isinstance(attributes[attribute], SEQUENCE_TYPES):
             for index, value in enumerate(attributes[attribute]):
-                vals.setComponentByPosition(index, prepare_for_sending(validate_attribute_value(schema, attribute, value, auto_encode)))
+                vals.setComponentByPosition(index, prepare_for_sending(validate_attribute_value(schema, attribute, value, auto_encode, validator, check_names)))
         else:
-            vals.setComponentByPosition(0, prepare_for_sending(validate_attribute_value(schema, attribute, attributes[attribute], auto_encode)))
+            vals.setComponentByPosition(0, prepare_for_sending(validate_attribute_value(schema, attribute, attributes[attribute], auto_encode, validator, check_names)))
 
         attribute_list[pos]['vals'] = vals
 

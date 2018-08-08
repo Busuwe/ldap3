@@ -64,7 +64,7 @@ Connection parameters are:
 
 * receive_timeout: set the socket in non-blocking mode - raising an exception after the specified amount of seconds if nothing is received over the wire
 
-* return_empty_attributes: when a search is performed if an attribute is empty then sets its value to an empty list, default to False
+* return_empty_attributes: when a search is performed if an attribute is empty then sets its value to an empty list, default to True
 
 * auto_range: if a server returns a fixed amount of entries in searches using the *range* tag (RFCs 3866) setting this value to True let the ldap3 library automatically request all entries with additional searches. The entries are returned as if a single search is performed
 
@@ -84,6 +84,8 @@ With the connection object you can perform all the standard LDAP operations:
 * bind: performs a bind to the LDAP Server with the authentication type and credential specified in the connection:
 
     * controls: additional controls to send in the request
+
+.. sidebar:: When binding with a username from an untrusted source (as a user typing it in a terminal or in a web page) you should perform ``escape_rdn(username)`` to ensure that the input value doesn't contain any illegal character. The escape_rdn() function is in the ldap3.utils.dn namespace.
 
 * unbind: disconnect and close the connection:
 

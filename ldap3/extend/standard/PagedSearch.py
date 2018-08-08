@@ -5,7 +5,7 @@
 #
 # Author: Giovanni Cannata
 #
-# Copyright 2014, 2015, 2016, 2017 Giovanni Cannata
+# Copyright 2014 - 2018 Giovanni Cannata
 #
 # This file is part of ldap3.
 #
@@ -25,9 +25,10 @@
 
 from ... import SUBTREE, DEREF_ALWAYS
 from ...utils.dn import safe_dn
-from ...core.results import DO_NOT_RAISE_EXCEPTIONS
+from ...core.results import DO_NOT_RAISE_EXCEPTIONS, RESULT_SIZE_LIMIT_EXCEEDED
 from ...core.exceptions import LDAPOperationResult
 from ...utils.log import log, log_enabled, ERROR, BASIC, PROTOCOL, NETWORK, EXTENDED
+
 
 def paged_search_generator(connection,
                            search_base,
@@ -68,16 +69,19 @@ def paged_search_generator(connection,
             response = connection.response
             result = connection.result
 
-        if result and result['result'] not in DO_NOT_RAISE_EXCEPTIONS:
-            if log_enabled(PROTOCOL):
-                log(PROTOCOL, 'paged search operation result <%s> for <%s>', result, connection)
-            raise LDAPOperationResult(result=result['result'], description=result['description'], dn=result['dn'], message=result['message'], response_type=result['type'])
-
         responses.extend(response)
         try:
             cookie = result['controls']['1.2.840.113556.1.4.319']['value']['cookie']
         except KeyError:
             cookie = None
+
+        if result and result['result'] not in DO_NOT_RAISE_EXCEPTIONS:
+            if log_enabled(PROTOCOL):
+                log(PROTOCOL, 'paged search operation result <%s> for <%s>', result, connection)
+            if result['result'] == RESULT_SIZE_LIMIT_EXCEEDED:
+                while responses:
+                    yield responses.pop()
+            raise LDAPOperationResult(result=result['result'], description=result['description'], dn=result['dn'], message=result['message'], response_type=result['type'])
 
         while responses:
             yield responses.pop()

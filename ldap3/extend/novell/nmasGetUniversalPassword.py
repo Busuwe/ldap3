@@ -5,7 +5,7 @@
 #
 # Author: Giovanni Cannata
 #
-# Copyright 2014, 2015, 2016, 2017 Giovanni Cannata
+# Copyright 2014 - 2018 Giovanni Cannata
 #
 # This file is part of ldap3.
 #
@@ -46,9 +46,11 @@ class NmasGetUniversalPassword(ExtendedOperation):
         self.request_value['reqdn'] = user
 
     def populate_result(self):
-        self.result['nmasver'] = int(self.decoded_response['nmasver'])
-        self.result['error'] = int(self.decoded_response['err'])
-        try:
-            self.result['password'] = str(self.decoded_response['passwd']) if self.decoded_response['passwd'] else None
-        except TypeError:
-            self.result['password'] = None
+        if self.decoded_response:
+            self.result['nmasver'] = int(self.decoded_response['nmasver'])
+            self.result['error'] = int(self.decoded_response['err'])
+            try:
+
+                self.result['password'] = str(self.decoded_response['passwd']) if self.decoded_response['passwd'].hasValue() else None
+            except TypeError:
+                self.result['password'] = None

@@ -1,3 +1,94 @@
+# 2.5.1 - not released yet
+    - connection.result is populated when exception raised with raise_exceptions=True
+    - fixed objectSid in mocking strategies
+    - fixed circular reference in exception history
+    - added objectSid validator
+    - byte values are properly searched in MOCK strategies (thanks dyj216)
+    - exception history refactored (thanks Tamas)
+    - connections in context manager don't bind anymore when auto_bind is set to AUTO_BIND_NONE (Thanks Tim)
+    - Cython compatible build (thanks Pedro)
+    - more detailed exception message in Mock strategy (thanks Janne)
+    - exceptions flow refactored in reusable strategy (thanks kxt)
+    - pwdlastset accept any positive integer (thanks abenbecker)
+    - fixed an exception while logging packet with pyasn1 decoder
+    - fixed importing abc from collections for Python 3.8
+
+
+# 2.5 - 2018.04.15
+    - abstract layer now handles auxiliary classes
+    - pwdLastSet in AD is valid for 0 and -1 (thanks Taylor)
+    - fixed extend.novell.get_universal_password (thanks Fernando)
+    - entryUUID is properly validated in search filters (thanks FriedrichI)
+    - custom attribute formatters are properly applied when parsing the search filter
+    - REUSABLE strategy now honours credentials when changed in the original connection (thanks Prof Hase)
+    - add operation doesn't change passed attribute dict anymore (thanks Daniele)
+    - missing entry's attribute return False when searching instead of raising an exception (thanks Maxsond)
+    - fixed ad_timestamp evaluation for integers (thanks Flynn)
+    - wrong exception raised when user name is empty in simple binding (thanks Ivan)
+    - exception is raised if size limit is exceed when searching in mocking strategies with raise_exceptions=True (thanks David)
+    - fixed validator for novell guid
+    - fixed validator for openldap EntryUUID
+    - fixed validator for AD objectGUID, now follows MS-DTYP
+    - fixed formatter for AD objectGUID
+    - fixed exception when adding binary values (thanks guidow)
+    - added escape_rdn_chars() to ldap3.utils.dn for safe checking untrusted input while building DNs (thanks Alex)
+    - fixed search for binary values in mock strategies
+    - fixed exception with unicode chars in subfilters for python 2 (thanks Friedrich)
+    - connection.extend.paged_search() doesn't miss the last entries anymore when size limit is exceeded on the server (thanks Friedrich)
+    - validators are not applied when loading data from json dump in Mock strategies (thanks Derek)
+    - additional validator to check for erroneous bytes to string conversion in Python 3 (thanks Brian)
+    - additional formatter and validator to check for generalizedTime with 0 year (thanks Brian)
+    - added ADDITIONAL_CLIENT_ENCODINGS parameter
+    - fixed AD dir_sync extended operation (thanks Lucas)
+    - ad_unlock_account works properly (thanks Francowxu)
+    - added Microsoft security descriptor control (thanks Dirk-jan)
+    - fixed search in mock strategies when raise_exceptions=True (thanks Derek)
+    - formatters never raise exceptions but return the raw_value when unable to format
+    - fixed controls duplication in paged search (thanks Dirk-jan)
+
+# 2.4.1 - 2018.01.21
+    - tested against pyasn1 from version 0.1.8 up to version 0.4.2, Python 2.6.6, Python 2.7.14, Python 3.6.4
+    - auto_encode parameter is honored when binding (thanks jkolo)
+    - fixed organizationalName definition in oid (thanks mingulov)
+    - automatic byte to int conversion working again (thanks Brian)
+    - mock connection searchs correctly escape filters (thanks kiddick)
+    - fixed bind with not unicode characters in Python 2 (thanks jkolo)
+    - extended filter attributes should work again with pyasn1 0.4.1 (thanks Dirk-jan)
+    - fixed error when reading incomplete server info
+    - NOT keyword properly handled in dit_content_rules (thanks Michael)
+    - operational attributes are prorerly returned in Cursor whit get_operational_attributes = True (thanks a23s4a)
+    - start_tls() is properly executed with AD when raise_exceptions=True (thanks Andrew)
+    - reopening a Connection honours auto_bind setting (thanks calken)
+    - an attribute returned with no value from a flaky server doesn't raise exception anymore (thanks Terrence)
+    - pwdLastSet in AD is valid only for -1 (thanks Thane)
+    - fixed docs for ldifProducer (thanks lhoekenga)
+    - fixed monkeypatching of pyasn1 for Boolean Value in BER encoding (thanks tmarlok88)
+    - check_names was not honoured while validating attribute values (thanks ymcymc)
+    - locks refactored in Connection and in Async strategy
+    - socket properly closed when checking availability of an invalid server
+
+# 2.4 - 2017.11.14
+    - security fix in the rebind() method of the Connection object (thanks Daniel)
+    - fix for Sasl credentials in Python 3 (thanks Busuwe)
+    - fixed bug when checking for equality in MockBase
+    - added validator parameter to Server object for custom validators
+    - attribute values are now validated in add/compare/modify operations in the Connection object
+    - Python types can now be used in add/compare/modify operations
+    - compatible with the pyasn1 library from version 0.1.8 up to latest (0.3.3 for now) version
+    - fixed compatibility with Twisted on Windows on Python 2.7 (thanks Pmisik)
+    - fixed paged_search behaviour in Reader object
+    - fixed regression in MockBase (thanks Markus)
+    - fixed invalid filter sequence in MockBase (thanks SignedBit)
+    - added compatibility with Cython (thanks Pedro)
+    - fixed auto_encode check in validate_attribute_value for unknown attrs (thanks CFelder)
+    - don't encode response_value as extended_response_to_dict expects a decoded value (thanks Matthias)
+    - compatible with the pyasn1 library from version 0.1.8 up to latest (0.3.7 for now) version
+    - added LDAPObjectDereferenceError exception
+    - LDAPObjectDereferenceError is raised when an object tries to dereference itself in the Abstraction Layer (thanks Daniele)
+    - async module renamed to asynchronous for compatibility with Python 3.7 (thank Barry)
+    - long integer are properly checked in mocking strategies (thanks gregn610)
+    - NUMERIC_TYPES includes long for Python 2
+
 # 2.3 - 2017.08.02
     - compatible with the pyasn1 library from version 0.1.8 up to latest (0.3.1 for now) version
     - MockAsync strategy is available

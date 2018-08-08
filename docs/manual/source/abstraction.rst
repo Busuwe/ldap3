@@ -1,7 +1,7 @@
 Abstraction Layer
 #################
 
-**A more pythonic LDAP**: LDAP operations look clumsy and hard-to-use because they reflect the old-age idea that time-consuming operations
+**Pythonic LDAP**: LDAP operations look clumsy and hard-to-use because they reflect the old-age idea that time-consuming operations
 should be done on the client to not clutter and hog the server with unneeded elaboration. ldap3 includes a fully functional **Abstraction
 Layer** that lets you interact with the DIT in a modern and *pythonic* way. With the Abstraction Layer you don't need to directly issue any
 LDAP operation at all.
@@ -77,6 +77,9 @@ This eases the use at the interactive ``>>>`` prompt where you don't have to rem
 Each class has a useful representation that summarize the instance status. You can access it directly at the interactive prompt,
 or in a program with the str() function.
 
+You can specify any additional auxiliary class with the ``auxiliary_class`` parameter.
+
+
 AttrDef class
 -------------
 The AttrDef class is used to define an abstract LDAP attribute. If you use the automatic ObjectDef creation the relevant AttrDefs
@@ -146,9 +149,11 @@ in the same Connection. The result of the second search is returned as value of 
     department += 'cn'
     department += AttrDef('member', key = 'employeer', dereference_dn = person)  # values of 'employeer' will be the 'Person' entries members of the found department
 
+If an object is referencing itself an ``LDAPObjectDereferenceError`` is raised.
+
 Cursor
 ------
-There are two kind of *Cursor* in the Abstraction Layer, **Reader** and **Writer**. This helps to avoid the risk of accidentally change
+There are two kind of *Cursor* in the Abstraction Layer, **Reader** and **Writer**. This helps avoiding the risk of accidentally change
 values when you're just reading them. This is a safe-guard because many application uses LDAP only for reading information,
 so having a read-only Cursor eliminates the risk of accidentally change or remove an entry. A Writer Cursor cannot read data
 from the DIT as well, Writer cursors are only used for DIT modification. Please refer to the Abstraction Layer tutorial for an in-depth
@@ -191,6 +196,8 @@ A Reader cursor has the following attributes:
 - errors: a list of LDAP Operation unsuccessful in the last Cursor operation
 
 - failed: a boolean that indicates if any LDAP operation failed in the last Cursor operation
+
+- auxiliary_class: a list of auxiliary class allowed in the entries
 
 
 To perform a search Operation you can use any of the following methods:

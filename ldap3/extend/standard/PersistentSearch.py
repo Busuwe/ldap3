@@ -5,7 +5,7 @@
 #
 # Author: Giovanni Cannata
 #
-# Copyright 2016, 2017 Giovanni Cannata
+# Copyright 2016 - 2018 Giovanni Cannata
 #
 # This file is part of ldap3.
 #
@@ -90,7 +90,7 @@ class PersistentSearch(object):
         if not self.connection.bound:
             self.connection.bind()
 
-        with self.connection.strategy.lock:
+        with self.connection.strategy.async_lock:
             self.message_id = self.connection.search(search_base=self.base,
                                                      search_filter=self.filter,
                                                      search_scope=self.scope,
@@ -106,7 +106,7 @@ class PersistentSearch(object):
         self.connection.unbind()
         if self.message_id in self.connection.strategy._responses:
             del self.connection.strategy._responses[self.message_id]
-        if hasattr(self.connection.strategy, '_requests') and self.message_id in self.connection.strategy._requests:  # async strategy has a dict of request that could be returned by get_response()
+        if hasattr(self.connection.strategy, '_requests') and self.message_id in self.connection.strategy._requests:  # asynchronous strategy has a dict of request that could be returned by get_response()
             del self.connection.strategy._requests[self.message_id]
         self.connection.strategy.persistent_search_message_id = None
         self.message_id = None

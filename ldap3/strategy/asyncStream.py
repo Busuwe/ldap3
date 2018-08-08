@@ -5,7 +5,7 @@
 #
 # Author: Giovanni Cannata
 #
-# Copyright 2016, 2017 Giovanni Cannata
+# Copyright 2016 - 2018 Giovanni Cannata
 #
 # This file is part of ldap3.
 #
@@ -33,7 +33,7 @@ from io import StringIO
 from os import linesep
 
 from ..protocol.rfc2849 import decode_persistent_search_control
-from ..strategy.async import AsyncStrategy
+from ..strategy.asynchronous import AsyncStrategy
 from ..core.exceptions import LDAPLDIFError
 from ..utils.conv import prepare_for_stream
 from ..protocol.rfc2849 import persistent_search_response_to_ldif, add_ldif_header
@@ -71,7 +71,7 @@ class AsyncStreamStrategy(AsyncStrategy):
 
     def accumulate_stream(self, message_id, change):
         if message_id == self.persistent_search_message_id:
-            with self.lock:
+            with self.async_lock:
                 self._responses[message_id] = []
             if self.streaming:
                 if not self._header_added and self.stream.tell() == 0:

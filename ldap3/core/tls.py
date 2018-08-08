@@ -5,7 +5,7 @@
 #
 # Author: Giovanni Cannata
 #
-# Copyright 2013, 2014, 2015, 2016, 2017 Giovanni Cannata
+# Copyright 2013 - 2018 Giovanni Cannata
 #
 # This file is part of ldap3.
 #
@@ -193,9 +193,9 @@ class Tls(object):
                     pass
 
             if self.sni:
-               wrapped_socket = ssl_context.wrap_socket(connection.socket, server_side=False, do_handshake_on_connect=do_handshake, server_hostname=self.sni)
+                wrapped_socket = ssl_context.wrap_socket(connection.socket, server_side=False, do_handshake_on_connect=do_handshake, server_hostname=self.sni)
             else:
-               wrapped_socket = ssl_context.wrap_socket(connection.socket, server_side=False, do_handshake_on_connect=do_handshake)
+                wrapped_socket = ssl_context.wrap_socket(connection.socket, server_side=False, do_handshake_on_connect=do_handshake)
             if log_enabled(NETWORK):
                 log(NETWORK, 'socket wrapped with SSL using SSLContext for <%s>', connection)
         else:
@@ -252,7 +252,7 @@ class Tls(object):
             connection._awaiting_for_async_start_tls = True  # some flaky servers (OpenLDAP) doesn't return the extended response name in response
         result = connection.extended('1.3.6.1.4.1.1466.20037')
         if not connection.strategy.sync:
-            # async - _start_tls must be executed by the strategy
+            # asynchronous - _start_tls must be executed by the strategy
             response = connection.get_response(result)
             if response != (None, None):
                 if log_enabled(BASIC):
@@ -274,23 +274,18 @@ class Tls(object):
             return self._start_tls(connection)
 
     def _start_tls(self, connection):
-        exc = None
         try:
             self.wrap_socket(connection, do_handshake=True)
         except Exception as e:
             connection.last_error = 'wrap socket error: ' + str(e)
-            exc = e
-
-        connection.starting_tls = False
-
-        if exc:
             if log_enabled(ERROR):
                 log(ERROR, 'error <%s> wrapping socket for TLS in <%s>', connection.last_error, connection)
-            raise start_tls_exception_factory(LDAPStartTLSError, exc)(connection.last_error)
+            raise start_tls_exception_factory(LDAPStartTLSError, e)(connection.last_error)
+        finally:
+            connection.starting_tls = False
 
         if connection.usage:
             connection._usage.wrapped_sockets += 1
-
         connection.tls_started = True
         return True
 

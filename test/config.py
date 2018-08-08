@@ -2,9 +2,7 @@
 
 # Created on 2013.05.23
 #
-# @author: Giovanni Cannata
-#
-# Copyright 2015 Giovanni Cannata
+# Copyright 2015 - 2018 Giovanni Cannata
 #
 # This file is part of ldap3.
 #
@@ -24,7 +22,7 @@
 from time import sleep
 from sys import version, getdefaultencoding, getfilesystemencoding
 from os import environ, remove
-from os.path import join
+from os import path
 from random import SystemRandom
 from tempfile import gettempdir
 
@@ -38,19 +36,19 @@ from ldap3.protocol.schemas.slapd24 import slapd_2_4_schema, slapd_2_4_dsa_info
 from ldap3.protocol.rfc4512 import SchemaInfo, DsaInfo
 from ldap3.utils.log import OFF, ERROR, BASIC, PROTOCOL, NETWORK, EXTENDED, set_library_log_detail_level, get_detail_level_name, set_library_log_activation_level, set_library_log_hide_sensitive_data
 from ldap3 import __version__ as ldap3_version
+from pyasn1 import __version__ as pyasn1_version
 
 test_strategy = SYNC  # possible choices: SYNC, ASYNC, RESTARTABLE, REUSABLE, MOCK_SYNC (not used on TRAVIS - look at .travis.yml)
 test_server_type = 'EDIR'  # possible choices: EDIR (Novell eDirectory), AD (Microsoft Active Directory), SLAPD (OpenLDAP)
 
 test_pool_size = 5
 test_logging = False
-test_log_detail = PROTOCOL
+test_log_detail = EXTENDED
 test_server_mode = IP_V6_PREFERRED
 test_pooling_strategy = ROUND_ROBIN
 test_pooling_active = 20
 test_pooling_exhaust = 15
-
-test_fast_decoder = True  # True uses internal 10x faster than pyasn1 decoder
+test_internal_decoder = True  # True uses then internal decodervfaster than pyasn1 while receiving data
 test_port = 389  # ldap port
 test_port_ssl = 636  # ldap secure port
 test_authentication = SIMPLE  # authentication type
@@ -61,7 +59,9 @@ test_receive_timeout = None
 test_auto_escape = True
 test_auto_encode = True
 test_lazy_connection = False
+test_user_password = 'Rc2597pfop'  # default password for users created in tests
 
+test_validator = {}
 try:
     location = environ['USERDOMAIN']
 except KeyError:
@@ -71,7 +71,7 @@ if 'TRAVIS' in location:
     test_strategy = environ['STRATEGY']
     test_lazy_connection = True if environ['LAZY'].upper() == 'TRUE' else False
     test_server_type = environ['SERVER']
-    test_fast_decoder = True if environ['DECODER'].upper() == 'INTERNAL' else False
+    test_internal_decoder = True if environ['DECODER'].upper() == 'INTERNAL' else False
     test_check_names = True if environ['CHECK_NAMES'].upper() == 'TRUE' else False
 else:
     location += '-' + test_server_type
@@ -80,7 +80,7 @@ else:
 # location = 'TRAVIS-LOCAL'
 # test_strategy = ASYNC
 # test_server_type = 'AD'
-# test_fast_decoder = True
+# test_internal_decoder = True
 
 if 'TRAVIS' in location:
     # test in the cloud
@@ -143,7 +143,7 @@ if 'TRAVIS' in location:
         test_user_key_file = ''  # 'local-forest-lab-administrator-key.pem'
         test_ntlm_user = test_domain_name.split('.')[0] + '\\Giovanni'
         test_ntlm_password = 'Rc666666pfop'
-        test_logging_filename = join(gettempdir(), 'ldap3.log')
+        test_logging_filename = path.join(gettempdir(), 'ldap3.log')
         test_valid_names = ['192.168.137.108', '192.168.137.109', 'WIN1.' + test_domain_name, 'WIN2.' + test_domain_name]
     elif test_server_type == 'SLAPD':
         test_server = 'ipa.demo1.freeipa.org'
@@ -209,7 +209,7 @@ elif location == 'ELITE10GC-EDIR':
     test_user_key_file = 'local-edir-test_admin-key.pem'
     test_ntlm_user = 'xxx\\yyy'
     test_ntlm_password = 'zzz'
-    test_logging_filename = join(gettempdir(), 'ldap3.log')
+    test_logging_filename = path.join(gettempdir(), 'ldap3.log')
     test_valid_names = ['192.168.137.101', '192.168.137.102']
 elif location == 'ELITE10GC-AD':
     # test notebook - Active Directory (AD)
@@ -243,7 +243,7 @@ elif location == 'ELITE10GC-AD':
     test_user_key_file = ''  # 'local-forest-lab-administrator-key.pem'
     test_ntlm_user = test_domain_name.split('.')[0] + '\\Administrator'
     test_ntlm_password = 'Rc6666pfop'
-    test_logging_filename = join(gettempdir(), 'ldap3.log')
+    test_logging_filename = path.join(gettempdir(), 'ldap3.log')
     test_valid_names = ['192.168.137.108', '192.168.137.109', 'WIN1.' + test_domain_name, 'WIN2.' + test_domain_name]
 elif location == 'ELITE10GC-SLAPD':
     # test notebook - OpenLDAP (SLAPD)
@@ -274,7 +274,7 @@ elif location == 'ELITE10GC-SLAPD':
     test_user_key_file = ''
     test_ntlm_user = 'xxx\\yyy'
     test_ntlm_password = 'zzz'
-    test_logging_filename = join(gettempdir(), 'ldap3.log')
+    test_logging_filename = path.join(gettempdir(), 'ldap3.log')
     test_valid_names = ['192.168.137.104']
 elif location == 'W10GC9227-EDIR':
     # test camera
@@ -310,7 +310,7 @@ elif location == 'W10GC9227-EDIR':
     test_user_key_file = 'local-edir-test_admin-key.pem'
     test_ntlm_user = 'AMM\\Administrator'
     test_ntlm_password = 'xxx'
-    test_logging_filename = join(gettempdir(), 'ldap3.log')
+    test_logging_filename = path.join(gettempdir(), 'ldap3.log')
     test_valid_names = ['sl10.intra.camera.it']
 elif location == 'W10GC9227-AD':
     # test notebook - Active Directory (AD)
@@ -342,7 +342,7 @@ elif location == 'W10GC9227-AD':
     test_user_key_file = ''  # 'local-forest-lab-administrator-key.pem'
     test_ntlm_user = test_domain_name.split('.')[0] + '\\Administrator'
     test_ntlm_password = 'Rc99pfop'
-    test_logging_filename = join(gettempdir(), 'ldap3.log')
+    test_logging_filename = path.join(gettempdir(), 'ldap3.log')
     test_valid_names = ['10.160.201.232']
 else:
     raise Exception('testing location ' + location + ' is not valid')
@@ -359,11 +359,11 @@ if test_logging:
     set_library_log_detail_level(test_log_detail)
 
 print('Testing location:', location, ' - Test server:', test_server)
-print('Python version:', version, ' - ldap3 version:', ldap3_version)
+print('Python version:', version, ' - ldap3 version:', ldap3_version, ' - pyasn1 version:', pyasn1_version,)
 print('Strategy:', test_strategy, '- Lazy:', test_lazy_connection, '- Check names:', test_check_names, '- Collect usage:', test_usage, ' - pool size:', test_pool_size)
 print('Default client encoding:', get_config_parameter('DEFAULT_CLIENT_ENCODING'), ' - Default server encoding:', get_config_parameter('DEFAULT_SERVER_ENCODING'),  '- Source encoding:', getdefaultencoding(), '- File encoding:', getfilesystemencoding(), ' - Additional server encodings:', ', '.join(get_config_parameter('ADDITIONAL_SERVER_ENCODINGS')))
-print('Logging:', 'False' if not test_logging else test_logging_filename, '- Log detail:', (get_detail_level_name(test_log_detail) if test_logging else 'None') + ' - Fast decoder: ', test_fast_decoder, ' - Response waiting timeout:', get_config_parameter('RESPONSE_WAITING_TIMEOUT'))
-
+print('Logging:', 'False' if not test_logging else test_logging_filename, '- Log detail:', (get_detail_level_name(test_log_detail) if test_logging else 'None') + ' - Internal decoder: ', test_internal_decoder, ' - Response waiting timeout:', get_config_parameter('RESPONSE_WAITING_TIMEOUT'))
+print()
 
 def random_id():
     return str(SystemRandom().random())[-5:]
@@ -383,7 +383,7 @@ def get_connection(bind=None,
                    ntlm_credentials=(None, None),
                    get_info=None,
                    usage=None,
-                   fast_decoder=None,
+                   internal_decoder=None,
                    simple_credentials=(None, None),
                    receive_timeout=None,
                    auto_escape=None,
@@ -401,8 +401,8 @@ def get_connection(bind=None,
         get_info = test_get_info
     if usage is None:
         usage = test_usage
-    if fast_decoder is None:
-        fast_decoder = test_fast_decoder
+    if internal_decoder is None:
+        internal_decoder = test_internal_decoder
     if receive_timeout is None:
         receive_timeout = test_receive_timeout
     if auto_escape is None:
@@ -460,7 +460,7 @@ def get_connection(bind=None,
                                 pool_size=test_pool_size,
                                 check_names=check_names,
                                 collect_usage=usage,
-                                fast_decoder=fast_decoder,
+                                fast_decoder=internal_decoder,
                                 receive_timeout=receive_timeout,
                                 auto_escape=auto_escape,
                                 auto_encode=auto_encode)
@@ -477,7 +477,7 @@ def get_connection(bind=None,
                                 pool_size=test_pool_size,
                                 check_names=check_names,
                                 collect_usage=usage,
-                                fast_decoder=fast_decoder,
+                                fast_decoder=internal_decoder,
                                 receive_timeout=receive_timeout,
                                 auto_escape=auto_escape,
                                 auto_encode=auto_encode)
@@ -494,7 +494,7 @@ def get_connection(bind=None,
                                 pool_size=test_pool_size,
                                 check_names=check_names,
                                 collect_usage=usage,
-                                fast_decoder=fast_decoder,
+                                fast_decoder=internal_decoder,
                                 receive_timeout=receive_timeout,
                                 auto_escape=auto_escape,
                                 auto_encode=auto_encode)
@@ -511,7 +511,7 @@ def get_connection(bind=None,
                                 pool_size=test_pool_size,
                                 check_names=check_names,
                                 collect_usage=usage,
-                                fast_decoder=fast_decoder,
+                                fast_decoder=internal_decoder,
                                 receive_timeout=receive_timeout,
                                 auto_escape=auto_escape,
                                 auto_encode=auto_encode)
@@ -620,7 +620,7 @@ def get_add_user_attributes(batch_id, username, password=None, attributes=None):
 
 def add_user(connection, batch_id, username, password=None, attributes=None, test_bytes=False):
     if password is None:
-        password = 'Rc2597pfop'
+        password = test_user_password
 
     attributes = get_add_user_attributes(batch_id, username, password, attributes)
     if test_bytes:
@@ -632,7 +632,7 @@ def add_user(connection, batch_id, username, password=None, attributes=None, tes
     if not result['description'] == 'success':
         # maybe the entry already exists, try to delete
         operation_result = connection.delete(dn)
-        sleep(2)
+        sleep(5)
         result = get_operation_result(connection, operation_result)
         operation_result = connection.add(dn, None, attributes)
         result = get_operation_result(connection, operation_result)

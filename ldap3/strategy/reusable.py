@@ -5,7 +5,7 @@
 #
 # Author: Giovanni Cannata
 #
-# Copyright 2014, 2015, 2016, 2017 Giovanni Cannata
+# Copyright 2014 - 2018 Giovanni Cannata
 #
 # This file is part of ldap3.
 #
@@ -28,7 +28,7 @@ from os import linesep
 from threading import Thread, Lock
 from time import sleep
 
-from .. import RESTARTABLE, get_config_parameter, AUTO_BIND_NONE, AUTO_BIND_NO_TLS, AUTO_BIND_TLS_AFTER_BIND, AUTO_BIND_TLS_BEFORE_BIND
+from .. import RESTARTABLE, get_config_parameter, AUTO_BIND_DEFAULT, AUTO_BIND_NONE, AUTO_BIND_NO_TLS, AUTO_BIND_TLS_AFTER_BIND, AUTO_BIND_TLS_BEFORE_BIND
 from .base import BaseStrategy
 from ..core.usage import ConnectionUsage
 from ..core.exceptions import LDAPConnectionPoolNameIsMandatoryError, LDAPConnectionPoolNotStartedError, LDAPOperationResult, LDAPExceptionError, LDAPResponseTimeoutError
@@ -60,6 +60,7 @@ class ReusableStrategy(BaseStrategy):
     Strategy has two customizable properties, the total number of connections in the pool and the lifetime of each connection.
     When lifetime is expired the connection is closed and will be open again when needed.
     """
+    pools = dict()
 
     def receiving(self):
         raise NotImplementedError
@@ -75,8 +76,6 @@ class ReusableStrategy(BaseStrategy):
 
     def set_stream(self, value):
         raise NotImplementedError
-
-    pools = dict()
 
     # noinspection PyProtectedMember
     class ConnectionPool(object):
@@ -116,7 +115,7 @@ class ReusableStrategy(BaseStrategy):
                 self.counter = 0
                 self.terminated_usage = ConnectionUsage() if connection._usage else None
                 self.terminated = False
-                self.lock = Lock()
+                self.pool_lock = Lock()
                 ReusableStrategy.pools[self.name] = self
                 self.started = False
                 if log_enabled(BASIC):
@@ -146,7 +145,7 @@ class ReusableStrategy(BaseStrategy):
 
         def get_info_from_server(self):
             for worker in self.workers:
-                with worker.lock:
+                with worker.worker_lock:
                     if not worker.connection.server.schema or not worker.connection.server.info:
                         worker.get_info_from_server = True
                     else:
@@ -154,7 +153,7 @@ class ReusableStrategy(BaseStrategy):
 
         def rebind_pool(self):
             for worker in self.workers:
-                with worker.lock:
+                with worker.worker_lock:
                     worker.connection.rebind(self.master_connection.user,
                                              self.master_connection.password,
                                              self.master_connection.authentication,
@@ -165,7 +164,7 @@ class ReusableStrategy(BaseStrategy):
             if not self.started:
                 self.create_pool()
                 for worker in self.workers:
-                    with worker.lock:
+                    with worker.worker_lock:
                         worker.thread.start()
                 self.started = True
                 self.terminated = False
@@ -218,7 +217,7 @@ class ReusableStrategy(BaseStrategy):
                         self.worker.connection.abandon(0)
                     continue
 
-                with self.worker.lock:
+                with self.worker.worker_lock:
                     self.worker.busy = True
                     if counter == TERMINATE_REUSABLE:
                         terminate = True
@@ -239,34 +238,38 @@ class ReusableStrategy(BaseStrategy):
                             if log_enabled(BASIC):
                                 log(BASIC, 'thread respawn')
                         if message_type not in ['bindRequest', 'unbindRequest']:
-                            if pool.open_pool and self.worker.connection.closed:
-                                self.worker.connection.open(read_server_info=False)
-                                if pool.tls_pool and not self.worker.connection.tls_started:
-                                    self.worker.connection.start_tls(read_server_info=False)
-                                if pool.bind_pool and not self.worker.connection.bound:
-                                    self.worker.connection.bind(read_server_info=False)
-                            elif pool.open_pool and not self.worker.connection.closed:  # connection already open, issues a start_tls
-                                if pool.tls_pool and not self.worker.connection.tls_started:
-                                    self.worker.connection.start_tls(read_server_info=False)
-                            if self.worker.get_info_from_server and counter:
-                                self.worker.connection._fire_deferred()
-                                self.worker.get_info_from_server = False
-                            exc = None
-                            response = None
-                            result = None
                             try:
+                                if pool.open_pool and self.worker.connection.closed:
+                                    self.worker.connection.open(read_server_info=False)
+                                    if pool.tls_pool and not self.worker.connection.tls_started:
+                                        self.worker.connection.start_tls(read_server_info=False)
+                                    if pool.bind_pool and not self.worker.connection.bound:
+                                        self.worker.connection.bind(read_server_info=False)
+                                elif pool.open_pool and not self.worker.connection.closed:  # connection already open, issues a start_tls
+                                    if pool.tls_pool and not self.worker.connection.tls_started:
+                                        self.worker.connection.start_tls(read_server_info=False)
+                                if self.worker.get_info_from_server and counter:
+                                    self.worker.connection._fire_deferred()
+                                    self.worker.get_info_from_server = False
+                                response = None
+                                result = None
                                 if message_type == 'searchRequest':
                                     response = self.worker.connection.post_send_search(self.worker.connection.send(message_type, request, controls))
                                 else:
                                     response = self.worker.connection.post_send_single_response(self.worker.connection.send(message_type, request, controls))
                                 result = self.worker.connection.result
-                            except LDAPOperationResult as e:  # raise_exceptions has raised an exception. It must be redirected to the original connection thread
-                                exc = e
-                            with pool.lock:
-                                if exc:
-                                    pool._incoming[counter] = (exc, None, None)
-                                else:
+                                with pool.pool_lock:
                                     pool._incoming[counter] = (response, result, BaseStrategy.decode_request(message_type, request, controls))
+                            except LDAPOperationResult as e:  # raise_exceptions has raised an exception. It must be redirected to the original connection thread
+                                with pool.pool_lock:
+                                    pool._incoming[counter] = (type(e)(str(e)), None, None)
+                            # except LDAPOperationResult as e:  # raise_exceptions has raised an exception. It must be redirected to the original connection thread
+                            #     exc = e
+                            # with pool.pool_lock:
+                            #     if exc:
+                            #         pool._incoming[counter] = (exc, None, None)
+                            #     else:
+                            #         pool._incoming[counter] = (response, result, BaseStrategy.decode_request(message_type, request, controls))
 
                     self.worker.busy = False
                     pool.request_queue.task_done()
@@ -289,10 +292,10 @@ class ReusableStrategy(BaseStrategy):
             self.get_info_from_server = False
             self.connection = None
             self.creation_time = None
-            self.new_connection()
             self.task_counter = 0
+            self.new_connection()
             self.thread = ReusableStrategy.PooledConnectionThread(self, self.master_connection)
-            self.lock = Lock()
+            self.worker_lock = Lock()
             if log_enabled(BASIC):
                 log(BASIC, 'instantiated PooledConnectionWorker: <%s>', self)
 
@@ -309,6 +312,7 @@ class ReusableStrategy(BaseStrategy):
         def new_connection(self):
             from ..core.connection import Connection
             # noinspection PyProtectedMember
+            self.creation_time = datetime.now()
             self.connection = Connection(server=self.master_connection.server_pool if self.master_connection.server_pool else self.master_connection.server,
                                          user=self.master_connection.user,
                                          password=self.master_connection.password,
@@ -330,7 +334,7 @@ class ReusableStrategy(BaseStrategy):
                                          return_empty_attributes=self.master_connection.empty_attributes)
 
             # simulates auto_bind, always with read_server_info=False
-            if self.master_connection.auto_bind and self.master_connection.auto_bind != AUTO_BIND_NONE:
+            if self.master_connection.auto_bind and self.master_connection.auto_bind not in [AUTO_BIND_NONE, AUTO_BIND_DEFAULT]:
                 if log_enabled(BASIC):
                     log(BASIC, 'performing automatic bind for <%s>', self.connection)
                 self.connection.open(read_server_info=False)
@@ -346,8 +350,6 @@ class ReusableStrategy(BaseStrategy):
             if self.master_connection.server_pool:
                 self.connection.server_pool = self.master_connection.server_pool
                 self.connection.server_pool.initialize(self.connection)
-
-            self.creation_time = datetime.now()
 
     # ReusableStrategy methods
     def __init__(self, ldap_connection):
@@ -403,7 +405,7 @@ class ReusableStrategy(BaseStrategy):
                 self.pool.tls_pool = True
                 counter = BOGUS_EXTENDED
             else:
-                with self.pool.lock:
+                with self.pool.pool_lock:
                     self.pool.counter += 1
                     if self.pool.counter > LDAP_MAX_INT:
                         self.pool.counter = 1
@@ -415,6 +417,18 @@ class ReusableStrategy(BaseStrategy):
         raise LDAPConnectionPoolNotStartedError('reusable connection pool not started')
 
     def validate_bind(self, controls):
+        # in case of a new connection or different credentials
+        if (self.connection.user != self.pool.master_connection.user or
+                self.connection.password != self.pool.master_connection.password or
+                self.connection.authentication != self.pool.master_connection.authentication or
+                self.connection.sasl_mechanism != self.pool.master_connection.sasl_mechanism or
+                self.connection.sasl_credentials != self.pool.master_connection.sasl_credentials):
+            self.pool.master_connection.user = self.connection.user
+            self.pool.master_connection.password = self.connection.password
+            self.pool.master_connection.authentication = self.connection.authentication
+            self.pool.master_connection.sasl_mechanism = self.connection.sasl_mechanism
+            self.pool.master_connection.sasl_credentials = self.connection.sasl_credentials
+            self.pool.rebind_pool()
         temp_connection = self.pool.workers[0].connection
         temp_connection.lazy = False
         if not self.connection.server.schema or not self.connection.server.info:
@@ -451,7 +465,7 @@ class ReusableStrategy(BaseStrategy):
             result = None
             while timeout >= 0:  # waiting for completed message to appear in _incoming
                 try:
-                    with self.connection.strategy.pool.lock:
+                    with self.connection.strategy.pool.pool_lock:
                         response, result, request = self.connection.strategy.pool._incoming.pop(counter)
                 except KeyError:
                     sleep(sleeptime)
